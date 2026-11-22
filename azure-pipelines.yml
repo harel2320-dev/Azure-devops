@@ -1,0 +1,24 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - task: UseDotNet@2
+    displayName: Install .NET 10 SDK
+    inputs:
+      packageType: sdk
+      version: 10.x       # pin the major so the build doesn't depend on the image's default
+
+  - script: dotnet --info
+    displayName: Show SDK info
+
+  - script: dotnet build src/HelloWorld/HelloWorld.csproj -c Release
+    displayName: Build
+
