@@ -4,6 +4,9 @@ trigger:
     - main
     - devops/*
 
+pool:
+  vmImage: ubuntu-latest
+
 variables:
   major: 1
   minor: 0
@@ -20,15 +23,22 @@ steps:
 
   - script: echo "Version = $(version)"
     displayName: Print version
+
+  # Default artifact name for every branch
+  - bash: echo "##vso[task.setvariable variable=artifactName]HelloWorld"
+    displayName: Default artifact name
+
+  # devops/* only: override the name to <branch>_<version> and tag the run
   - bash: |
-      BRANCH="${BUILD_SOURCEBRANCH#refs/heads/}"   # strip the refs/heads/ prefix
-      BRANCH="${BRANCH//\//-}"                     # replace / with -
+      BRANCH="${BUILD_SOURCEBRANCH#refs/heads/}"
+      BRANCH="${BRANCH//\//-}"
       NAME="${BRANCH}_$(version)"
       echo "Artifact name: $NAME"
       echo "##vso[task.setvariable variable=artifactName]$NAME"
       echo "##vso[build.addbuildtag]$NAME"
     displayName: Name and tag (devops/* only)
     condition: and(succeeded(), eq(variables['isDevops'], 'True'))
+
   - script: dotnet build src/HelloWorld/HelloWorld.csproj -c Release -p:Version=$(version)
     displayName: Build
 
@@ -42,7 +52,7 @@ steps:
     condition: and(succeeded(), eq(variables['isDevops'], 'True'))
 
   - task: NuGetAuthenticate@1
-    displayName: Authenticate to Azure Artifacts
+    displayName: Authenticate to Azure Artifacts (devops/* only)
     condition: and(succeeded(), eq(variables['isDevops'], 'True'))
 
   - script: >
@@ -52,9 +62,9 @@ steps:
     displayName: Push NuGet to feed (devops/* only)
     condition: and(succeeded(), eq(variables['isDevops'], 'True'))
 
+  # The single upload: the app folder, named HelloWorld or <branch>_<version>
   - task: PublishPipelineArtifact@1
-    displayName: Upload nupkg as $(artifactName) (devops/* only)
-    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
+    displayName: Upload artifact
     inputs:
-      targetPath: $(Build.ArtifactStagingDirectory)/nupkg
+      targetPath: $(Build.ArtifactStagingDirectory)/app
       artifactName: $(artifactName)
