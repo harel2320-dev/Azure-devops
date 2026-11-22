@@ -1,15 +1,15 @@
 trigger:
-- main
-
-pool:
-  vmImage: ubuntu-latest
+  branches:
+    include:
+    - main
+    - devops/*
 
 variables:
   major: 1
   minor: 0
-  # counter(prefix, seed): +1 each run for the same "1.0" prefix; resets to 0 if the prefix changes
   patch: $[counter(format('{0}.{1}', variables['major'], variables['minor']), 0)]
   version: $(major).$(minor).$(patch)
+  isDevops: $[startsWith(variables['Build.SourceBranch'], 'refs/heads/devops/')]
 
 steps:
   - task: UseDotNet@2
@@ -20,7 +20,15 @@ steps:
 
   - script: echo "Version = $(version)"
     displayName: Print version
-
+  - bash: |
+      BRANCH="${BUILD_SOURCEBRANCH#refs/heads/}"   # strip the refs/heads/ prefix
+      BRANCH="${BRANCH//\//-}"                     # replace / with -
+      NAME="${BRANCH}_$(version)"
+      echo "Artifact name: $NAME"
+      echo "##vso[task.setvariable variable=artifactName]$NAME"
+      echo "##vso[build.addbuildtag]$NAME"
+    displayName: Name and tag (devops/* only)
+    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
   - script: dotnet build src/HelloWorld/HelloWorld.csproj -c Release -p:Version=$(version)
     displayName: Build
 
