@@ -97,3 +97,17 @@ steps:
     inputs:
       targetPath: $(Build.ArtifactStagingDirectory)/app
       artifactName: $(artifactName)
+
+  # Part 1: the product as a Universal Package in the Azure Artifacts feed (main only, never on PR builds)
+  - task: UniversalPackages@0
+    displayName: Publish app to feed (main only)
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    inputs:
+      command: publish
+      publishDirectory: $(Build.ArtifactStagingDirectory)/app
+      feedsToUsePublish: internal
+      vstsFeedPublish: Harel/hello-feed
+      vstsFeedPackagePublish: helloworld-app
+      versionOption: custom
+      versionPublish: $(version)
+      packagePublishDescription: HelloWorld app build $(version)
