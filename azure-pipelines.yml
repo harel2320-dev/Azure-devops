@@ -35,8 +35,26 @@ steps:
   - script: dotnet publish src/HelloWorld/HelloWorld.csproj -c Release --no-build -o $(Build.ArtifactStagingDirectory)/app
     displayName: Publish to staging folder
 
+  - script: >
+      dotnet pack src/HelloWorld/HelloWorld.csproj -c Release --no-build
+      -p:PackageVersion=$(version) -o $(Build.ArtifactStagingDirectory)/nupkg
+    displayName: Pack NuGet (devops/* only)
+    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
+
+  - task: NuGetAuthenticate@1
+    displayName: Authenticate to Azure Artifacts
+    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
+
+  - script: >
+      dotnet nuget push "$(Build.ArtifactStagingDirectory)/nupkg/*.nupkg"
+      --source "https://pkgs.dev.azure.com/hareloosh007/Harel/_packaging/hello-feed/nuget/v3/index.json"
+      --api-key az
+    displayName: Push NuGet to feed (devops/* only)
+    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
+
   - task: PublishPipelineArtifact@1
-    displayName: Upload artifact
+    displayName: Upload nupkg as $(artifactName) (devops/* only)
+    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
     inputs:
-      targetPath: $(Build.ArtifactStagingDirectory)/app
-      artifactName: HelloWorld
+      targetPath: $(Build.ArtifactStagingDirectory)/nupkg
+      artifactName: $(artifactName)
