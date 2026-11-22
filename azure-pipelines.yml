@@ -44,7 +44,7 @@ steps:
     condition: and(succeeded(), eq(variables['isDevops'], 'True'))
 
   # SonarQube: prepare BEFORE build, analyze AFTER build (devops/* only)
-  - task: SonarCloudPrepare@4
+  - task: SonarCloudPrepare@4.4.0
     displayName: Sonar prepare (devops/* only)
     condition: and(succeeded(), eq(variables['isDevops'], 'True'))
     inputs:
@@ -58,13 +58,13 @@ steps:
   - script: dotnet build src/HelloWorld/HelloWorld.csproj -c Release -p:Version=$(version)
     displayName: Build
 
-  - task: SonarCloudAnalyze@4
+  - task: SonarCloudAnalyze@4.4.0
     displayName: Sonar analyze (devops/* only)
     condition: and(succeeded(), eq(variables['isDevops'], 'True'))
     inputs:
       jdkversion: 'JAVA_HOME_21_X64'
 
-  - task: SonarCloudPublish@4
+  - task: SonarCloudPublish@4.4.0
     displayName: Sonar quality gate (devops/* only)
     condition: and(succeeded(), eq(variables['isDevops'], 'True'))
     inputs:
