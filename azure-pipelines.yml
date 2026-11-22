@@ -15,6 +15,10 @@ variables:
   isDevops: $[startsWith(variables['Build.SourceBranch'], 'refs/heads/devops/')]
 
 steps:
+  # Full git history (SonarQube needs it)
+  - checkout: self
+    fetchDepth: 0
+
   - task: UseDotNet@2
     displayName: Install .NET 10 SDK
     inputs:
@@ -24,9 +28,11 @@ steps:
   - script: echo "Version = $(version)"
     displayName: Print version
 
+  # Default artifact name for every branch
   - bash: echo "##vso[task.setvariable variable=artifactName]HelloWorld"
     displayName: Default artifact name
 
+  # devops/* only: override the name to <branch>_<version> and tag the run
   - bash: |
       BRANCH="${BUILD_SOURCEBRANCH#refs/heads/}"
       BRANCH="${BRANCH//\//-}"
@@ -37,12 +43,37 @@ steps:
     displayName: Name and tag (devops/* only)
     condition: and(succeeded(), eq(variables['isDevops'], 'True'))
 
+  # SonarQube: prepare BEFORE build, analyze AFTER build (devops/* only)
+  - task: SonarCloudPrepare@4.4.0
+    displayName: Sonar prepare (devops/* only)
+    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
+    inputs:
+      SonarCloud: 'sonarcloud-conn'
+      organization: 'harel2320-dev'
+      scannerMode: 'dotnet'
+      projectKey: 'harel2320-dev_Azure-devops'
+      projectName: 'Azure-devops'
+      projectVersion: '$(version)'
+
   - script: dotnet build src/HelloWorld/HelloWorld.csproj -c Release -p:Version=$(version)
     displayName: Build
+
+  - task: SonarCloudAnalyze@4.4.0
+    displayName: Sonar analyze (devops/* only)
+    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
+    inputs:
+      jdkversion: 'JAVA_HOME_21_X64'
+
+  - task: SonarCloudPublish@4.4.0
+    displayName: Sonar quality gate (devops/* only)
+    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
+    inputs:
+      pollingTimeoutSec: '300'
 
   - script: dotnet publish src/HelloWorld/HelloWorld.csproj -c Release --no-build -o $(Build.ArtifactStagingDirectory)/app
     displayName: Publish to staging folder
 
+  # NuGet: devops/* only
   - script: >
       dotnet pack src/HelloWorld/HelloWorld.csproj -c Release --no-build
       -p:PackageVersion=$(version) -o $(Build.ArtifactStagingDirectory)/nupkg
@@ -60,6 +91,7 @@ steps:
     displayName: Push NuGet to feed (devops/* only)
     condition: and(succeeded(), eq(variables['isDevops'], 'True'))
 
+  # The single upload: the app folder, named HelloWorld or <branch>_<version>
   - task: PublishPipelineArtifact@1
     displayName: Upload artifact
     inputs:
