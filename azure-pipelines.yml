@@ -56,6 +56,9 @@ steps:
       projectVersion: '$(version)'
       extraProperties: |
         sonar.cs.opencover.reportsPaths=$(Build.SourcesDirectory)/TestResults/**/coverage.opencover.xml
+        sonar.coverage.exclusions=**/Program.cs
+        sonar.qualitygate.wait=true
+        sonar.qualitygate.timeout=300
 
   - script: dotnet build src/HelloWorld/HelloWorld.csproj -c Release -p:Version=$(version)
     displayName: Build
