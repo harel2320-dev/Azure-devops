@@ -15,38 +15,31 @@ variables:
   isDevops: $[startsWith(variables['Build.SourceBranch'], 'refs/heads/devops/')]
 
 steps:
-  # Full git history (SonarQube needs it)
   - checkout: self
-    fetchDepth: 0
+    fetchDepth: 0            # full history, SonarQube needs it
 
   - task: UseDotNet@2
     displayName: Install .NET 10 SDK
-    inputs:
-      packageType: sdk
-      version: 10.x
+    inputs: {packageType: sdk, version: 10.x}
 
   - script: echo "Version = $(version)"
     displayName: Print version
 
-  # Default artifact name for every branch
-  - bash: echo "##vso[task.setvariable variable=artifactName]HelloWorld"
-    displayName: Default artifact name
-
-  # devops/* only: override the name to <branch>_<version> and tag the run
+  # Artifact name: HelloWorld, or <branch>_<version> + build tag on devops/*
   - bash: |
-      BRANCH="${BUILD_SOURCEBRANCH#refs/heads/}"
-      BRANCH="${BRANCH//\//-}"
-      NAME="${BRANCH}_$(version)"
+      NAME=HelloWorld
+      if [ "$(isDevops)" = "True" ]; then
+        BRANCH="${BUILD_SOURCEBRANCH#refs/heads/}"
+        NAME="${BRANCH//\//-}_$(version)"
+        echo "##vso[build.addbuildtag]$NAME"
+      fi
       echo "Artifact name: $NAME"
       echo "##vso[task.setvariable variable=artifactName]$NAME"
-      echo "##vso[build.addbuildtag]$NAME"
-    displayName: Name and tag (devops/* only)
-    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
+    displayName: Artifact name and tag
 
-  # SonarQube: prepare BEFORE build, analyze AFTER build (devops/* only)
   - task: SonarCloudPrepare@4.4.0
-    displayName: Sonar prepare (devops/* only)
-    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
+    displayName: Sonar prepare (devops/*)
+    condition: and(succeeded(), eq(variables.isDevops, 'True'))
     inputs:
       SonarCloud: 'sonarcloud-conn'
       organization: 'harel2320-dev'
@@ -54,53 +47,70 @@ steps:
       projectKey: 'harel2320-dev_Azure-devops'
       projectName: 'Azure-devops'
       projectVersion: '$(version)'
+      extraProperties: |
+        sonar.cs.opencover.reportsPaths=$(Build.SourcesDirectory)/TestResults/**/coverage.opencover.xml
+        sonar.coverage.exclusions=**/Program.cs
+        sonar.qualitygate.wait=true
+        sonar.qualitygate.timeout=300
 
   - script: dotnet build src/HelloWorld/HelloWorld.csproj -c Release -p:Version=$(version)
     displayName: Build
 
+  # All branches. -p:Version keeps HelloWorld.dll at the pipeline version.
+  - script: >
+      dotnet test tests/HelloWorld.Tests -c Release -p:Version=$(version)
+      --collect:"XPlat Code Coverage"
+      --results-directory $(Build.SourcesDirectory)/TestResults
+      -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+    displayName: Test with coverage
+
+  # All branches. `dotnet list package` always exits 0, so fail on its report text.
+  - bash: |
+      dotnet list tests/HelloWorld.Tests package --vulnerable --include-transitive | tee vulnerable.txt
+      if grep -q 'has the following vulnerable packages' vulnerable.txt; then
+        echo "##vso[task.logissue type=error]Vulnerable NuGet packages found"
+        exit 1
+      fi
+    displayName: Check vulnerable dependencies
+
   - task: SonarCloudAnalyze@4.4.0
-    displayName: Sonar analyze (devops/* only)
-    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
+    displayName: Sonar analyze (devops/*)
+    condition: and(succeeded(), eq(variables.isDevops, 'True'))
     inputs:
       jdkversion: 'JAVA_HOME_21_X64'
 
   - task: SonarCloudPublish@4.4.0
-    displayName: Sonar quality gate (devops/* only)
-    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
+    displayName: Sonar quality gate (devops/*)
+    condition: and(succeeded(), eq(variables.isDevops, 'True'))
     inputs:
       pollingTimeoutSec: '300'
 
   - script: dotnet publish src/HelloWorld/HelloWorld.csproj -c Release --no-build -o $(Build.ArtifactStagingDirectory)/app
     displayName: Publish to staging folder
 
-  # NuGet: devops/* only
-  - script: >
-      dotnet pack src/HelloWorld/HelloWorld.csproj -c Release --no-build
-      -p:PackageVersion=$(version) -o $(Build.ArtifactStagingDirectory)/nupkg
-    displayName: Pack NuGet (devops/* only)
-    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
-
   - task: NuGetAuthenticate@1
-    displayName: Authenticate to Azure Artifacts (devops/* only)
-    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
+    displayName: Authenticate to Azure Artifacts (devops/*)
+    condition: and(succeeded(), eq(variables.isDevops, 'True'))
 
-  - script: >
-      dotnet nuget push "$(Build.ArtifactStagingDirectory)/nupkg/*.nupkg"
-      --source "https://pkgs.dev.azure.com/hareloosh007/Harel/_packaging/hello-feed/nuget/v3/index.json"
-      --api-key az
-    displayName: Push NuGet to feed (devops/* only)
-    condition: and(succeeded(), eq(variables['isDevops'], 'True'))
+  - bash: |
+      dotnet pack src/HelloWorld/HelloWorld.csproj -c Release --no-build \
+        -p:PackageVersion=$(version) -o $(Build.ArtifactStagingDirectory)/nupkg
+      dotnet nuget push "$(Build.ArtifactStagingDirectory)/nupkg/*.nupkg" \
+        --source "https://pkgs.dev.azure.com/hareloosh007/Harel/_packaging/hello-feed/nuget/v3/index.json" \
+        --api-key az
+    displayName: Pack and push NuGet (devops/*)
+    condition: and(succeeded(), eq(variables.isDevops, 'True'))
 
-  # The single upload: the app folder, named HelloWorld or <branch>_<version>
+  # The single upload of the app folder: HelloWorld or <branch>_<version>
   - task: PublishPipelineArtifact@1
     displayName: Upload artifact
     inputs:
       targetPath: $(Build.ArtifactStagingDirectory)/app
       artifactName: $(artifactName)
 
-  # Part 1: the product as a Universal Package in the Azure Artifacts feed (main only, never on PR builds)
+  # main only, never on PR builds
   - task: UniversalPackages@0
-    displayName: Publish app to feed (main only)
+    displayName: Publish app to feed (main)
     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
     inputs:
       command: publish
